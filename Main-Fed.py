@@ -44,13 +44,21 @@ prob_ext = args.clext
 # modes_list = {'chd2d':None, 'intch': None, 'intchd2d': None, 'd2d':None, 'cfl': None, 'sgd' : None}
 # 'd2d': d2d_flags, 'hd2d': hd2d_flags, 'hfl': hfl_flags, 'chd2d':chd2d_flags, 'intch': intch_flags, 'intchd2d':intchd2d_flags, 'gossip':gossip_flags, 'hgossip':hgossip_flags, 'cfl':cfl_flags, 'sgd':None
 
+# Aggregation Schemes
 # modes_list = {'d2dsel':None, 'd2dlay':None, 'staled2d':None, 'd2d':None, 'hfl':None, 'cfl':None}
 # modes_list = {'intchd2d':None, 'intchd2dsel':None, 'd2dlay':None, 'd2d':None,}
 # modes_list  = {'intchd2d':None, 'd2d':None, 'intchgossip':None}
-# modes_list = {'d2dstalemodel':None, 'd2dsel':None, 'd2dacc':None,  'd2d':None, 'gossip':None}
-# modes_list = {'d2daccwtexp':None, 'd2daccwtnorm':None, 'd2daccwtskew':None, 'd2daccwtlin':None, 'd2dacc':None, 'd2dloss':None, 'd2d':None}
-modes_list = {'d2dexnhbr':None, 'd2dmgs':None, 'd2d':None}
 
+# Node Selection Modes
+# modes_list = {'d2dstalemodel':None, 'd2dsel':None, 'd2dacc':None,  'd2d':None, 'gossip':None}
+modes_list = {'d2daccwtexp':None, 'd2daccwtnorm':None, 'd2daccwtskew':None, 'd2daccwtlin':None, 'd2dacc':None, 'd2dloss':None, 'd2d':None}
+
+
+# Memory and Relay Modes
+# modes_list = {'d2dexnhbr':None, 'd2dmgs':None, 'd2d':None}
+# modes_list = {'d2dfullmem':None,'d2dexnhbr':None, 'd2dmemextndrly':None, 'd2dmem':None, 'd2d':None} #   'd2dexrly':None, 'd2dmemextnd':None, 'd2dexnhbrred':None,
+# modes_list = {'d2d':None, 'gossip':None, 'hfl':None, 'cfl':None}
+# modes_list = {'d2dfullmem':None}
 # modes_list = {'d2dgrad': None, 'd2dstalegrad':None, 'd2d':None, 'gossip':None}
 
 
@@ -127,10 +135,17 @@ def D2DFL(model_type, dataset, batch_size, test_batch_size, modes, num_nodes, nu
     d2dacc_flags = {'d2d_agg_flg' : 'D2DAcc', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
     d2dloss_flags = {'d2d_agg_flg' : 'D2DLoss', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
     d2dmem_flags = {'d2d_agg_flg' : 'D2DMem', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+    d2dfullmem_flags = {'d2d_agg_flg' : 'D2DFullMem', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+
     d2dexnhbr_flags = {'d2d_agg_flg' : 'D2DExNh', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+    d2dexnhbrred_flags = {'d2d_agg_flg' : 'D2DExNhRed', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False} 
+    d2dexrly_flags = {'d2d_agg_flg' : 'D2DExRly', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+    d2dmemextnd_flags = {'d2d_agg_flg' : 'D2DMemExtnd', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+    d2dmemextndrly_flags = {'d2d_agg_flg' : 'D2DMemExtndRly', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+
     d2dmgs_flags = {'d2d_agg_flg' : 'D2DMGS', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
     # hd2d_flags = {'d2d_agg_flg' : 'D2D', 'ch_agg_flg': False, 'hserver_agg_flg': True, 'inter_ch_agg_flg': False}
-    # hfl_flags = {'d2d_agg_flg' : False, 'ch_agg_flg': False, 'hserver_agg_flg': True, 'inter_ch_agg_flg': False}
+    hfl_flags = {'d2d_agg_flg' : False, 'ch_agg_flg': False, 'hserver_agg_flg': True, 'inter_ch_agg_flg': False}
     # chd2d_flags = {'d2d_agg_flg' : 'D2D', 'ch_agg_flg': True, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
     # intch_flags = {'d2d_agg_flg' : False, 'ch_agg_flg': True, 'hserver_agg_flg': False, 'inter_ch_agg_flg': True}
     # intchd2d_flags = {'d2d_agg_flg' : 'D2D', 'ch_agg_flg': True, 'hserver_agg_flg': False, 'inter_ch_agg_flg': True}
@@ -138,12 +153,13 @@ def D2DFL(model_type, dataset, batch_size, test_batch_size, modes, num_nodes, nu
     # intchd2dsel_flags = {'d2d_agg_flg' : 'Layer_D2D', 'ch_agg_flg': True, 'hserver_agg_flg': False, 'inter_ch_agg_flg': True}
     gossip_flags = {'d2d_agg_flg' : 'Random', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
     # hgossip_flags = {'d2d_agg_flg' : 'Random', 'ch_agg_flg': False, 'hserver_agg_flg': True, 'inter_ch_agg_flg': False}
-    # cfl_flags = {'d2d_agg_flg' : 'CServer', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
+    cfl_flags = {'d2d_agg_flg' : 'CServer', 'ch_agg_flg': False, 'hserver_agg_flg': False, 'inter_ch_agg_flg': False}
 
     flag_dict = {'d2d': d2d_flags, 'd2dsel': d2dsel_flags, 'd2dlay': d2dlay_flags, 'd2dstalelay': d2dstalelay_flags, 'd2dstalemodel':d2dstalemodel_flags, 
     'd2dgrad': d2dgrad_flags, 'd2dstalegrad': d2dstalegrad_flags, 'gossip':gossip_flags, 'd2daccwtexp':d2daccwtexp_flags, 'd2daccwtnorm':d2daccwtnorm_flags,
-    'd2daccwtskew':d2daccwtskew_flags, 'd2daccwtlin':d2daccwtlin_flags,'d2dacc':d2dacc_flags, 'd2dloss':d2dloss_flags, 'd2dmem':d2dmem_flags, 
-    'd2dexnhbr': d2dexnhbr_flags, 'd2dmgs':d2dmgs_flags}
+    'd2daccwtskew':d2daccwtskew_flags, 'd2daccwtlin':d2daccwtlin_flags,'d2dacc':d2dacc_flags, 'd2dloss':d2dloss_flags, 'd2dmem':d2dmem_flags, 'd2dfullmem':d2dfullmem_flags, 
+    'd2dexnhbr': d2dexnhbr_flags, 'd2dexrly': d2dexrly_flags, 'd2dmemextnd':d2dmemextnd_flags, 'd2dmemextndrly':d2dmemextndrly_flags, 'd2dexnhbrred':d2dexnhbrred_flags,
+    'd2dmgs':d2dmgs_flags, 'hfl':hfl_flags, 'cfl':cfl_flags}
     
     # flag_dict = {'d2d': d2d_flags, 'd2dsel': d2dsel_flags, 'd2dlay': d2dlay_flags, 'staled2d':staled2d_flags, 'hd2d': hd2d_flags, 'hfl': hfl_flags, 
     #              'chd2d':chd2d_flags, 'intch': intch_flags, 'intchd2d':intchd2d_flags, 'intchd2dsel':intchd2dsel_flags,'gossip':gossip_flags, 'intchgossip':intchgossip_flags,
@@ -183,7 +199,7 @@ def D2DFL(model_type, dataset, batch_size, test_batch_size, modes, num_nodes, nu
                 modes[mode].update_round(min_epochs,  max_epochs)
 
                 # Perform validation on Locally trained/fine-tuned models
-                # print(f'Validation Round {rnd}- Mode {mode}')
+                print(f'Validation Round {rnd}- Mode {mode}')
                 modes[mode].val_round()
 
                 #4-Aggregate from neighborhood  using the weights obtained in the previous step
@@ -229,8 +245,18 @@ def D2DFL(model_type, dataset, batch_size, test_batch_size, modes, num_nodes, nu
                     
                     elif modes[mode].d2d_agg_flg == 'D2DMem':
                         modes[mode].d2dmem_aggregate_round(agg_prop)
+                    elif modes[mode].d2d_agg_flg == 'D2DFullMem':
+                        modes[mode].d2dfullmem_aggregate_round(agg_prop)
+                    elif modes[mode].d2d_agg_flg == 'D2DMemExtnd':
+                        modes[mode].d2dmemextnd_aggregate_round(agg_prop, rnd)
+                    elif modes[mode].d2d_agg_flg == 'D2DMemExtndRly':
+                        modes[mode].d2dmemextndrly_aggregate_round(agg_prop, rnd)
                     elif modes[mode].d2d_agg_flg == 'D2DExNh':
                         modes[mode].d2dexnhbr_aggregate_round(agg_prop, rnd)
+                    elif modes[mode].d2d_agg_flg == 'D2DExRly':
+                        modes[mode].d2dextnrly_aggregate_round(agg_prop, rnd)
+                    elif modes[mode].d2d_agg_flg == 'D2DExNhRed':
+                        modes[mode].d2dexnhbrred_aggregate_round(agg_prop, rnd)
                     elif modes[mode].d2d_agg_flg == 'D2DMGS':
                         modes[mode].nhood_aggregate_round(agg_prop)
                         modes[mode].random_aggregate_round()
@@ -259,9 +285,10 @@ def D2DFL(model_type, dataset, batch_size, test_batch_size, modes, num_nodes, nu
                     #Final Server Aggregation
                     modes[mode].serverset[-1].aggregate_servers(modes[mode].serverset[:-1], modes[mode].nodeset)
 
-                # Perform Testing on Locally trained/fine-tuned models
-                # print(f'Testing Round {rnd}- Mode {mode}')
+                # Perform Testing on aggregated models
                 modes[mode].test_round(env.cluster_set)
+
+                modes[mode].record_round_models()
                 
                 # Interim Record
                 if rnd % 5 == 0 and rnd != (num_rounds - 1):

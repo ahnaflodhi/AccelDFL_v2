@@ -69,11 +69,16 @@ class Nodes:
         self.divergence_dict = {node:[] for node in div_targets}
         self.divergence_conv_dict = {node:[] for node in div_targets}
         self.divergence_fc_dict = {node:[] for node in div_targets}
+        self.selection_counts = {'agg':0, 'mem':0, 'red':0}
+        self.nhbrmodel_array = {n:None for n in self.neighborhood}
         
     def base_model_selection(self, base_model, num_labels, in_channels, dataset, wt_init):
         # Same weight initialization
         self.model = copy.deepcopy(base_model)
         self.prevmodel = copy.deepcopy(self.model).to('cuda') # Record of the node's own model from the previous round
+        self.red_model = copy.deepcopy(self.model).to('cuda')
+        self.prevrnd_model = copy.deepcopy(self.model).to('cuda')
+
 #         if wt_init == True:
 #             self.model.load_state_dict(base_mode.state_dict())
         self.opt = optim.SGD(self.model.parameters(), lr = self.lr) # , momentum = 0.9
@@ -89,6 +94,8 @@ class Nodes:
         else:
             self.trgacc.append(0.00)
             self.trgloss.append(0.00)
+
+        self.prevmodel.load_state_dict(self.model.state_dict())
         # print(f'Node{self.idx}-{self.epochs}', end = ', ', flush = True)
 #         if len(self.trgloss) > 1:
 #             print(f'Node {self.idx} : Delta Trgloss = {self.trgloss[-2] - self.trgloss[-1]:0.3f}', end = ",  ", flush = True)
@@ -100,7 +107,7 @@ class Nodes:
         _, prev_acc = test(self.prevmodel, self.testloader)
         self.testloss.append(test_loss)
         self.testacc.append(test_acc)
-        print(f'Node{self.idx}: Test Acc= {self.testacc[-1]:0.3f} Prev Acc = {prev_acc:0.3f}', end = ", ", flush = True) #LR={self.opt.param_groups[0]["lr"]} Trg Loss= {self.trgloss[-1]:0.3f} Trg Acc= {self.trgacc[-1]}
+        # print(f'Node{self.idx}: Test Acc: Agg = {self.testacc[-1]:0.3f} Udpate = {prev_acc:0.3f}', end = ", ", flush = True) #LR={self.opt.param_groups[0]["lr"]} Trg Loss= {self.trgloss[-1]:0.3f} Trg Acc= {self.trgacc[-1]}
 
     def node_val(self, valloader):
         val_loss, val_acc = test(self.model, valloader)
@@ -141,11 +148,10 @@ class Nodes:
     def aggregate_nodesmemory(self, nodeset, agg_prop, scale:dict):
         agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
         agg_targets = random.sample(self.neighborhood,agg_scope)
-        
         agg_targets.append(self.idx)
-        _, acc = test(self.prevmodel, self.testloader)
 
-        agg_model = aggregate_frommem(nodeset, agg_targets, self.neighborhood, self.agg_record, scale)
+        temp = [x for x in self.agg_record if x not in agg_targets]
+        agg_model = aggregate_frommem(nodeset, agg_targets, temp, scale)
         self.model.load_state_dict(agg_model.state_dict())
 
         self.agg_record = agg_targets # Update aggregation record
@@ -156,22 +162,167 @@ class Nodes:
     def aggregate_extndnhbr(self, nodeset, agg_prop, rnd, scale):
         agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
         agg_targets = random.sample(self.neighborhood,agg_scope) # Receiving step
+        agg_targets.append(self.idx) #Adding self
+
         if rnd > 0:
             temp = []
-            for node in nodeset:
-                if node.idx in agg_targets:
-                    nonoverlap_nhbr = [x for x in node.agg_record if x not in self.neighborhood]
-                    temp.append(random.sample(nonoverlap_nhbr,1)[0])
+            for node in agg_targets:
+                if node != self.idx:
+                    nonoverlap_nhbr = [x for x in nodeset[node].agg_record if (x not in self.neighborhood and x != self.idx)]
+                    if len(nonoverlap_nhbr) > 0:
+                        # Reduce operation for nonoverlapping nodes
+                        # temp.append(node)
+                        # temp_model = aggregate_prevrnd(nodeset, nonoverlap_nhbr, scale) # model_list, self_idx, prev_list, scale
+                        # nodeset[node].red_model.load_state_dict(temp_model.state_dict()) # Intermediate location
 
-            agg_targets = list(set(agg_targets + temp))
-
-        agg_targets.append(self.idx) #Adding self
-        # print(agg_scope, self.neighborhood , agg_targets)
-        agg_model = aggregate(nodeset, agg_targets, scale) # Aggregating
+                        temp.append(random.sample(nonoverlap_nhbr, 1)[0])
+                        
+            # agg_model = aggregate_reduce(nodeset, agg_targets, temp, scale) # Aggregating with reduction operation
+            agg_model = aggregate_frommem(nodeset, agg_targets, temp, scale)
+            
+        else:
+            agg_model = aggregate(nodeset, agg_targets, scale)
+        
         self.model.load_state_dict(agg_model.state_dict()) # Updating local model
 
         self.agg_record = agg_targets
         self.agg_record.remove(self.idx)
+
+        del agg_model
+        gc.collect()
+ 
+    def aggregate_memextend(self, nodeset, agg_prop, rnd, scale):
+        agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
+        agg_targets = random.sample(self.neighborhood,agg_scope) # Receiving step
+        agg_targets.append(self.idx)
+        
+        if rnd == 0:
+            agg_model = aggregate(nodeset, agg_targets, scale)
+            self.model.load_state_dict(agg_model.state_dict())
+
+        else:
+            memnodes = [x for x in self.agg_record if x not in agg_targets] # Local to the node
+
+            red_list = [] # reduced models from nodes in agg_targets
+            for node in agg_targets:
+                if node != self.idx:
+                    nonoverlap_nhbr = [x for x in nodeset[node].agg_record if (x not in self.neighborhood and x != self.idx)]
+                    if len(nonoverlap_nhbr) > 0:
+                        red_list.append(node)
+                        tempred_model = aggregate_prevrnd(nodeset, nonoverlap_nhbr, scale)
+                        nodeset[node].red_model.load_state_dict(tempred_model.state_dict())
+
+                # print(f'Mem, {memnodes}, Red {red_list}, Agg {agg_targets}', end = ',', flush=True)
+        
+            agg_model = aggregate_tristatus(nodeset, agg_targets, memnodes, red_list, scale)
+
+        self.model.load_state_dict(agg_model.state_dict())
+
+        self.agg_record = agg_targets
+        self.agg_record.remove(self.idx)
+        del agg_model
+        gc.collect()
+
+    def aggregate_memextendrly(self, nodeset, agg_prop, rnd, scale): #aggregate_d2dmemextendrly
+        agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
+        agg_targets = random.sample(self.neighborhood,agg_scope) # Receiving step
+        agg_targets.append(self.idx)
+        memnodes = []
+
+        if rnd == 0:
+            agg_model = aggregate(nodeset, agg_targets, scale)
+            self.model.load_state_dict(agg_model.state_dict())
+        else:
+            memnodes = [x for x in self.agg_record if x not in agg_targets]
+            for node in agg_targets:
+                if node != self.idx:
+                    nonoverlap_nhbr = [x for x in nodeset[node].agg_record if (x not in self.neighborhood and x != self.idx)]
+                    if len(nonoverlap_nhbr) > 0:
+                        memnodes.append(random.sample(nonoverlap_nhbr, 1)[0]) # Sending one non-overlap node to recipient node
+
+                    # print(f'Mem, {memnodes}, Agg {agg_targets}', end = ',', flush=True)
+
+            agg_model = aggregate_frommem(nodeset, agg_targets, memnodes, scale)
+        
+        self.model.load_state_dict(agg_model.state_dict())
+
+        self.agg_record = agg_targets
+        self.agg_record.remove(self.idx)
+
+        del agg_model
+        gc.collect()
+
+    def aggregate_extnrly(self, nodeset, agg_prop, rnd, scale):
+        agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
+        agg_targets = random.sample(self.neighborhood,agg_scope) # Receiving step
+        agg_targets.append(self.idx)
+
+        if rnd == 0 :
+            agg_model = aggregate(nodeset, agg_targets, scale)
+            self.model.load_state_dict(agg_model.state_dict())
+
+        else:
+            red_list = []
+            for node in agg_targets:
+                temp = []
+                nonoverlap_nhbr = [x for x in nodeset[node].agg_record if (x not in self.neighborhood and x != self.idx)]
+
+                if len(nonoverlap_nhbr) > 0:
+                    temp = nonoverlap_nhbr
+                    temp.append(nodeset[node].idx)
+                    red_list.append(node)
+                    agg_targets.remove(node)
+                    # temp.append(random.sample(nonoverlap_nhbr,1)[0])
+                    # temp.append(nodeset[node].idx)
+                    tempred_model =  aggregate_prevrnd(nodeset, temp, scale)
+                    nodeset[node].red_model.load_state_dict(tempred_model.state_dict())
+
+            agg_targets.append(self.idx)
+            agg_model = aggregate_reduce(nodeset, agg_targets, red_list, scale)
+
+            self.model.load_state_dict(agg_model.state_dict())
+            self.agg_record = agg_targets
+            self.agg_record.remove(self.idx)
+
+        del agg_model
+        gc.collect()
+
+    def aggregate_extndnhbrred(self, nodeset, agg_prop, rnd, scale):
+        agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
+        agg_targets = random.sample(self.neighborhood,agg_scope) # Receiving step
+        agg_targets.append(self.idx)
+        
+        if rnd > 0:
+
+            for node in agg_targets:
+                red_list = []
+                if node != self.idx:
+                    nonoverlap_nhbr = [x for x in nodeset[node].agg_record if (x not in self.neighborhood and x != self.idx)]
+                    if len(nonoverlap_nhbr) > 0:
+                        red_model =  aggregate_prevrnd(nodeset, nonoverlap_nhbr, scale)
+                        node.red_model.load_state_dict(red_model.state_dict())
+                        red_list.append(node)
+            agg_model = aggregate_reduce(nodeset, agg_targets, red_list, scale)
+        else:
+            agg_model = aggregate(nodeset, agg_targets, scale)
+        
+        self.model.load_state_dict(agg_model.state_dict())
+        del agg_model
+        gc.collect()
+
+    def aggregate_nodesfullmem(self, nodeset, agg_prop, scale):
+        agg_scope = int(np.ceil(agg_prop * len(self.neighborhood)))
+        agg_targets = random.sample(self.neighborhood,agg_scope)
+        agg_targets.append(self.idx)
+
+        memlist = [x for x in list(self.nhbrmodel_array.keys()) if (x not in agg_targets and self.nhbrmodel_array[x] is not None)]
+
+        agg_model = aggregate_fullmem(nodeset, agg_targets, memlist, self.nhbrmodel_array, scale)
+        self.model.load_state_dict(agg_model.state_dict())
+
+        self.agg_record = agg_targets # Update aggregation record
+        for node in agg_targets:
+            self.nhbrmodel_array[node] = copy.deepcopy(nodeset[node].model).cpu()
 
         del agg_model
         gc.collect()
@@ -283,7 +434,6 @@ class Nodes:
         del agg_model
         gc.collect()
 
-
     def nhbrhood_dict(self, nodeset, eps = 1000, key = 'valacc'):
         reg_dict = {nhbr:None for nhbr in self.neighborhood}
         norm_dict ={nhbr:None for nhbr in self.neighborhood}
@@ -323,7 +473,6 @@ class Nodes:
         #         agg_targets.append(sampled_key[0])
         
         agg_targets.append(self.idx)
-        print(agg_targets)
         agg_model = aggregate(nodeset, agg_targets, scale)
         self.model.load_state_dict(agg_model.state_dict())
         del agg_model
@@ -413,7 +562,6 @@ class Nodes:
         target_nodes = int(np.floor(agg_prop * len(self.neighborhood)))
         pass
 
-    
     def stalemodel_aggregate(self, nodeset, staleglobal, scale, agg_prop, rnd, cos_thresh):
         self.global_coscheck(staleglobal, nodeset)
         agg_full = []

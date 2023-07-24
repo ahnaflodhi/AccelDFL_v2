@@ -94,6 +94,7 @@ def save_file(flmode, folder, files_list, args, **nameargs):
                       'global_cosvals' : {node:flmode.nodeset[node].global_cosvals for node in range(nameargs['num_nodes'])},
                       'label_data':{node:flmode.nodeset[node].label_data for node in range(nameargs['num_nodes'])},
                       'gradnorms':{node:flmode.nodeset[node].gradnorms for node in range(nameargs['num_nodes'])},
+                      'selection_counts':{node:flmode.nodeset[node].selection_counts for node in range(nameargs['num_nodes'])},
                       'arguments': args
                       } # 
                       #'grad_stats':{node:flmode.nodeset[node].grad_stats for node in range(nameargs['num_nodes'])},
@@ -138,4 +139,3 @@ def combine_results(folder, files_list, inter_list):
         os.remove(os.path.join('./', file))
         
     print('Finished Combining and removing interim results')
-    

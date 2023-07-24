@@ -99,11 +99,11 @@ def node_update(client_model, optimizer, train_loader, record_loss, record_acc, 
             loss = F.cross_entropy(output, targets)
             _ , output = torch.max(output.data, 1)
             loss.backward()
-            for p in client_model.parameters():
-                param_norm = p.grad.detach().data.norm(2)
-                total_norm += param_norm.item() ** 2
-                total_norm = total_norm ** 0.5
-            gradnorms.append(total_norm)
+            # for p in client_model.parameters():
+            #     param_norm = p.grad.detach().data.norm(2)
+            #     total_norm += param_norm.item() ** 2
+            #     total_norm = total_norm ** 0.5
+            # gradnorms.append(total_norm)
             # grads = [param.grad for param in client_model.parameters()]
             # for i, grad in enumerate(grads):
             #     grad_stats['mean'].append(grad.mean()) # Append Mean
@@ -131,14 +131,14 @@ def node_update(client_model, optimizer, train_loader, record_loss, record_acc, 
 #     gc.collect()
     
 def aggregate(model_list, node_list:list, scale:dict, noise = False):
-    agg_model = copy.deepcopy(model_list[0].model)
+    agg_model = copy.deepcopy(model_list[0].prevmodel)
     
     # Zeroing container model so that scaling weights may be assigned to each participating model
     for layer in agg_model.state_dict().keys():
         agg_model.state_dict()[layer].mul_(0.00)
     
     if noise == True: # Create copies so that original models are not corrupted. Only received ones become noisy
-        models = {node:Net.add_noise(copy.deepcopy(model_list[node].model)) for node in node_list}
+        models = {node:Net.add_noise(copy.deepcopy(model_list[node].prevmodel)) for node in node_list}
         for layer in agg_model.state_dict().keys():
             for node in node_list:
                 agg_model.state_dict()[layer].add_(torch.mul(models[node].state_dict()[layer], scale[node]))
@@ -149,25 +149,116 @@ def aggregate(model_list, node_list:list, scale:dict, noise = False):
     else: # Without adding Noise
         for layer in agg_model.state_dict().keys():
             for node in node_list:
-                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].model.state_dict()[layer], scale[node]))
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevmodel.state_dict()[layer], scale[node]))
             agg_model.state_dict()[layer].div_(len(node_list))
         
     return agg_model
 # nodeset, agg_targets, self.neighborhood, self.agg_record, scale
 
-def aggregate_frommem(model_list, node_list:list, nhood:list, agg_hist:list, scale, noise=False):
+
+def aggregate_reduce(model_list, prev_list:list, red_list:list, scale:dict):
     agg_model = copy.deepcopy(model_list[0].model)
 
     for layer in agg_model.state_dict().keys():
-        i = 0
-        for node in nhood:
-            if node in node_list:
-                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].model.state_dict()[layer], scale[node]))
-                i +=1
-            elif node in agg_hist:
+        agg_model.state_dict()[layer].mul_(0.00)
+    
+    nodes = list(set(prev_list + red_list))
+    
+    for layer in agg_model.state_dict().keys():
+        for node in nodes:
+            agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevmodel.state_dict()[layer], scale[node]))
+            model_list[node].selection_counts['agg'] += 1
+            if node in red_list:
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].red_model.state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['red'] += 1
+        agg_model.state_dict()[layer].div_(len(prev_list) + len(red_list))
+
+    return agg_model
+
+def aggregate_tristatus(model_list, prev_list:list, prevrnd_list:list, red_list:list, scale:dict):
+    agg_model = copy.deepcopy(model_list[0].model)
+
+    for layer in agg_model.state_dict().keys():
+        agg_model.state_dict()[layer].mul_(0.00)
+    
+    nodes = list(set(prev_list + red_list + prevrnd_list))
+    
+    for layer in agg_model.state_dict().keys():
+        for node in nodes:
+            if node in prev_list:
                 agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevmodel.state_dict()[layer], scale[node]))
-                i += 1
-        agg_model.state_dict()[layer].div_(i)
+                model_list[node].selection_counts['agg'] += 1
+            elif node in prevrnd_list:
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevrnd_model.state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['mem'] += 1
+            elif node in red_list:
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].red_model.state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['red'] += 1
+                
+        agg_model.state_dict()[layer].div_(len(prev_list) + len(red_list))
+
+    return agg_model
+
+def aggregate_frommem(model_list, node_list:list, prev_list:list, scale, noise=False):
+    agg_model = copy.deepcopy(model_list[0].model)
+    for layer in agg_model.state_dict().keys():
+        agg_model.state_dict()[layer].mul_(0.00)
+
+    nodes = list(set(node_list + prev_list))
+    for layer in agg_model.state_dict().keys():
+        for node in nodes:
+            if node in node_list:
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevmodel.state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['agg'] += 1
+            elif node in prev_list:
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevrnd_model.state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['mem'] += 1
+
+        agg_model.state_dict()[layer].div_(len(node_list) + len(prev_list))
+    return agg_model
+
+
+def aggregate_fullmem(model_list, node_list:list, mem_list:list, mem_array:dict, scale, noise=False): # node_list and prev_list must be mutually exclusive
+    agg_model = copy.deepcopy(model_list[0].model)
+    for layer in agg_model.state_dict().keys():
+        agg_model.state_dict()[layer].mul_(0.00)
+
+    if list(mem_array.keys()) != []:
+        for node in mem_list:
+            if mem_array[node] != None:
+                mem_array[node].cuda()
+
+    nodes = list(set(node_list + mem_list))
+    for layer in agg_model.state_dict().keys():
+        for node in nodes:
+            if node in node_list:
+                agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevmodel.state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['agg'] += 1
+            elif node in mem_list:
+                agg_model.state_dict()[layer].add_(torch.mul(mem_array[node].state_dict()[layer], scale[node]))
+                model_list[node].selection_counts['mem'] += 1
+
+        agg_model.state_dict()[layer].div_(len(node_list) + len(mem_list))
+
+    if list(mem_array.keys()) != []:
+        for node in mem_list:
+            if mem_array[node] != None:
+                mem_array[node].cpu()
+    
+    return agg_model
+
+
+def aggregate_prevrnd(model_list, prev_list, scale):
+    agg_model = copy.deepcopy(model_list[0].model)
+    for layer in agg_model.state_dict().keys():
+        agg_model.state_dict()[layer].mul_(0.00)
+
+    for layer in agg_model.state_dict().keys():
+        for node in prev_list:
+            agg_model.state_dict()[layer].add_(torch.mul(model_list[node].prevrnd_model.state_dict()[layer], scale[node]))
+            model_list[node].selection_counts['mem'] += 1
+        agg_model.state_dict()[layer].div_(len(prev_list))
+    
     return agg_model
 
 def selective_aggregate(model_list, agg_full:list, scale:dict, agg_conv = None, noise = False):
@@ -261,7 +352,6 @@ def stalelayerwise_aggregate(model_list, self_idx, stale_cflmodel, nodelist, sca
             
     return agg_model
 
-
 def model_checker(model1, model2):
     models_differ = 0
     for modeldata1, modeldata2 in zip(model1.state_dict().items(), model2.state_dict().items()):
@@ -292,7 +382,6 @@ def test(model, test_loader):
     acc = correct / len(test_loader.dataset)
 
     return test_loss, acc
-
 
 def test_gradients(model, test_loader):
     grad_vectors = np.zeros((10))
@@ -340,7 +429,6 @@ def calculate_divergence(modes, main_model_dict, cluster_set, num_nodes, diverge
                 for layer in ref_weight.keys():                          
                     divergence_results[mode][target_node][layer].append(torch.linalg.norm(ref_weight[layer] - target_weight[layer]))
     return  divergence_results
-
 
 def clustering_divergence(model_dict, cluster_graph, num_nodes):
     divergence_results = []

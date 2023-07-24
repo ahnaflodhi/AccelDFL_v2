@@ -213,10 +213,12 @@ class FL_Modes(Nodes):
         temp_loss = []
 
         for node in tqdm(self.nodeset, desc='Node Update Status'):
-            epochs = np.random.randint(emin, emax) # Different local updates. Set to a number if homogenous training needed
+            try:
+                epochs = np.random.randint(emin, emax) # Different local updates. Set to a number if homogenous training needed
+            except:
+                epochs = abs(emax)
             # print(f'Check Node {i}-model on Cuda : {next(node.model.parameters()).is_cuda}')
             node.model.to('cuda')
-            node.prevmodel = copy.deepcopy(node.model)
             node.local_update(epochs) # Asynchronous Aggregation. Change epochs to self.epochs for synchronous operation.
             temp_acc.append(node.trgacc[-1])
             temp_loss.append(node.trgloss[-1])
@@ -246,11 +248,14 @@ class FL_Modes(Nodes):
         self.avgtestloss.append(np.round(np.mean(temp_loss), 3))
         print(f'Avg Test Acc-{np.mean(temp_acc):0.3f} Variance {np.var(temp_acc):0.3f} max {max(temp_acc):0.3f} min {min(temp_acc):0.3f}')
 
-        
         # Calculate glolbal and cluter averages
         self.global_avgs()
         self.cluster_avgs(cluster_set)
 
+    def record_round_models(self):
+        for node in self.nodeset:
+            node.prevrnd_model.load_state_dict(node.prevmodel.state_dict())
+            
     def gradient_ranking_round(self, ref_rnd, cos_lim, global_ref = False):
         # Updates ranked neighborhood on the basis of gradient rankings
         for node in self.nodeset:
@@ -299,9 +304,29 @@ class FL_Modes(Nodes):
         for node in self.nodeset:
             node.aggregate_nodesmemory(self.nodeset, agg_prop, self.weights)
 
+    def d2dfullmem_aggregate_round(self, agg_prop):
+        for node in self.nodeset:
+            node.aggregate_nodesfullmem(self.nodeset, agg_prop, self.weights)
+
+    def d2dmemextnd_aggregate_round(self, agg_prop:float, rnd):
+        for node in self.nodeset:
+            node.aggregate_memextend(self.nodeset, agg_prop, rnd, self.weights)
+
+    def d2dmemextndrly_aggregate_round(self, agg_prop:float, rnd:int):
+        for node in self.nodeset:
+            node.aggregate_memextendrly(self.nodeset, agg_prop, rnd, self.weights)
+
     def d2dexnhbr_aggregate_round(self, agg_prop, rnd):
         for node in self.nodeset:
             node.aggregate_extndnhbr(self.nodeset, agg_prop, rnd, self.weights)
+
+    def d2dexnhbrred_aggregate_round(self, agg_prop, rnd):
+        for node in self.nodeset:
+            node.aggregate_extndnhbrred(self.nodeset, agg_prop, rnd, self.weights)
+
+    def d2dextnrly_aggregate_round(self, agg_prop, rnd):
+        for node in self.nodeset:
+            node.aggregate_extnrly(self.nodeset, agg_prop, rnd, self.weights)
             
     def clshead_aggregate_round(self, cluster_head, cluster_set, agg_prop):
         self.nodeset[cluster_head].aggregate_nodes(self.nodeset, agg_prop, self.weights, cluster_set = cluster_set)
